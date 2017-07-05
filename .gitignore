@@ -46,3 +46,9 @@ libpcre/stamp-h1
 ndiff/INSTALLED_FILES
 
 nsock/src/configure
+
+nping/configure
+
+ncat/configure
+
+nbase/configure
