@@ -1,5 +1,4 @@
 local nmap = require "nmap"
-local coroutine = require "coroutine"
 local stdnse = require "stdnse"
 local table = require "table"
 local bin = require "bin"
@@ -15,17 +14,22 @@ Discovers KNX gateways by sending a KNX Search Request to the multicast address
 will respond with a KNX Search Response including various information about the
 gateway, such as KNX address and supported services.
 
+This script is based on the llmnr-resolve.nse script, as it technicallly.
+Credits go out to the author.
+
 Further information:
   * DIN EN 13321-2
   * http://www.knx.org/
 ]]
 
-author = {"Niklaus Schiess <nschiess@ernw.de>", "Dominik Schneider <dschneider@ernw.de>"}
-license = "Same as Nmap--See https://nmap.org/book/man-legal.html"
+author = "Niklaus Schiess <nschiess@ernw.de>, Dominik Schneider <dschneider@ernw.de>"
+license = "Same as Nmap--See http://nmap.org/book/man-legal.html"
 categories = {"discovery", "safe", "broadcast"}
 
----
---@args timeout Max time to wait for a response. (default 3s)
+--
+--@args
+-- timeout Max time to wait for a response. (default 3s)
+-- newtargets Add found gateways to target list
 --
 --@usage
 -- nmap --script knx-gateway-discover -e eth0
@@ -126,15 +130,6 @@ local parseKnxAddress = function(addr)
   return a..'.'..b..'.'..c
 end
 
-local fam_meta = {
-  __tostring = function (self)
-    return ("%s version %d"):format(
-      knxServiceFamilies[self.service_id] or self.service_id,
-      self.Version
-      )
-  end
-}
-
 --- Parse a Search Response
 -- @param knxMessage Payload of captures UDP packet
 local knxParseSearchResponse = function(ips, results, knxMessage)
@@ -172,6 +167,15 @@ local knxParseSearchResponse = function(ips, results, knxMessage)
   local _, knx_supp_svc_families_structure_length = bin.unpack('>C', knxMessage, _)
   local _, knx_supp_svc_families_description = bin.unpack('>C', knxMessage, _)
   knx_supp_svc_families_description = knxDibDescriptionTypes[knx_supp_svc_families_description] or knx_supp_svc_families_description
+
+  local fam_meta = {
+    __tostring = function (self)
+      return ("%s version %d"):format(
+        knxServiceFamilies[self.service_id] or self.service_id,
+        self.Version
+        )
+    end
+  }
 
   for i=0,(knx_total_length-_),2 do
     local family = {}

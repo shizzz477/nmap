@@ -1,6 +1,7 @@
 local nmap = require "nmap"
 local shortport = require "shortport"
 local bin = require "bin"
+local bit = require "bit"
 local ipOps = require "ipOps"
 local stdnse = require "stdnse"
 
@@ -12,32 +13,32 @@ Further information:
   * http://www.knx.org/
 ]]
 
-author = {"Niklaus Schiess <nschiess@ernw.de>", "Dominik Schneider <dschneider@ernw.de>"}
-license = "Same as Nmap--See https://nmap.org/book/man-legal.html"
+author = "Niklaus Schiess <nschiess@ernw.de>, Dominik Schneider <dschneider@ernw.de>"
+license = "Same as Nmap--See http://nmap.org/book/man-legal.html"
 categories = {"default", "discovery", "safe"}
 portrule = shortport.port_or_service(3671, "efcp", "udp")
 
----
+--
 --@output
--- 3671/udp open|filtered efcp
--- | knx-gateway-info:
--- |   Body:
--- |     DIB_DEV_INFO:
--- |       KNX address: 15.15.255
--- |       Decive serial: 00ef2650065c
+-- 3671/udp open  efcp    KNXnet/IP Gateway
+-- | knx-gateway-info: 
+-- |   Body: 
+-- |     DIB_DEV_INFO: 
+-- |       KNX address: 1.2.200
+-- |       Decive serial: 00e70880d151
 -- |       Multicast address: 0.0.0.0
 -- |       Device friendly name: IP-Viewer
--- |     DIB_SUPP_SVC_FAMILIES:
--- |       KNXnet/IP Core version 1
--- |       KNXnet/IP Device Management version 1
--- |       KNXnet/IP Tunneling version 1
--- |_      KNXnet/IP Object Server version 1
+-- |     DIB_SUPP_SVC_FAMILIES: 
+-- |       KNXnet/IP Core
+-- |       KNXnet/IP Device Management
+-- |       KNXnet/IP Tunnelling
+-- |_      KNXnet/IP Object Server
 --
 
 local knxServiceFamilies = {
   [0x02]="KNXnet/IP Core",
   [0x03]="KNXnet/IP Device Management",
-  [0x04]="KNXnet/IP Tunneling",
+  [0x04]="KNXnet/IP Tunnelling",
   [0x05]="KNXnet/IP Routing",
   [0x06]="KNXnet/IP Remote Logging",
   [0x08]="KNXnet/IP Object Server",
@@ -72,28 +73,19 @@ local knxQuery = function(ip_address, port)
     0x000e, -- Total length
     0x08, -- Structure length
     0x01, -- Host protocol
-    ipOps.todword(ip_address),
-    port
+    ipOps.todword('0.0.0.0'),
+    0
   )
 end
 
 -- Parse a KNX address from raw bytes
 -- @param addr Unpacked 2 bytes
 local parseKnxAddress = function(addr)
-  local a = (addr & 0xf000) >> 12
-  local b = (addr & 0x0f00) >>  8
-  local c = addr & 0xff
+  local a = bit.rshift(bit.band(addr, 0xf000),12)
+  local b = bit.rshift(bit.band(addr, 0x0f00), 8)
+  local c = bit.band(addr, 0xff)
   return a..'.'..b..'.'..c
 end
-
-local fam_meta = {
-  __tostring = function (self)
-    return ("%s version %d"):format(
-      knxServiceFamilies[self.service_id] or self.service_id,
-      self.Version
-      )
-  end
-}
 
 --- Parse a Description Response
 -- @param knxMessage UDP response packet
@@ -121,15 +113,24 @@ local knxParseDescriptionResponse = function(knxMessage)
   local _, knx_dib_dev_mac = bin.unpack('>A6', knxMessage, _)
   knx_dib_dev_mac = stdnse.format_mac(knx_dib_dev_mac)
   local _, knx_dib_dev_friendly_name = bin.unpack('>A30', knxMessage, _)
+  knx_dib_dev_friendly_name = knx_dib_dev_friendly_name:gsub('\x00','')
 
   local knx_supp_svc_families = {}
   local _, knx_supp_svc_families_structure_length = bin.unpack('>C', knxMessage, _)
   local _, knx_supp_svc_families_description = bin.unpack('>C', knxMessage, _)
   knx_supp_svc_families_description = knxDibDescriptionTypes[knx_supp_svc_families_description] or knx_supp_svc_families_description
 
-  for i=0,(knx_total_length-_),2 do
+  local fam_meta = {
+    __tostring = function (self)
+      return ("%s"):format(
+        knxServiceFamilies[self.service_id] or self.service_id)
+    end
+  }
+  
+  local svc_families_length = knx_supp_svc_families_structure_length - 2
+  for i=0,(svc_families_length),2 do
     local family = {}
-    _, family.service_id, family.Version = bin.unpack('CC', knxMessage, _)
+    _, family.service_id, _ = bin.unpack('CC', knxMessage, _)
     setmetatable(family, fam_meta)
     knx_supp_svc_families[#knx_supp_svc_families+1] = family
   end
@@ -170,10 +171,10 @@ end
 
 action = function(host, port)
   local sock = nmap.new_socket()
-  local status, err = sock:connect(host, port)
+  local status, err = sock:connect(host, port, "udp")
 
   if not status then
-    stdnse.debug1("Connect failed: %s", err)
+    stdnse.debug1("%s", err)
     return
   end
 
@@ -182,8 +183,7 @@ action = function(host, port)
   local status, data = sock:receive()
 
   if not status then
-    stdnse.debug("Receive failed: %s", err)
-    sock:close()
+    stdnse.debug("%s", err)
     return
   end
 

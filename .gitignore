@@ -52,3 +52,5 @@ nping/configure
 ncat/configure
 
 nbase/configure
+
+\.idea/

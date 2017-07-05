@@ -1,3 +1,4 @@
+local nmap = require 'nmap'
 local comm = require 'comm'
 local string = require 'string'
 local stdnse = require 'stdnse'
@@ -5,9 +6,9 @@ local shortport = require 'shortport'
 local sslcert = require 'sslcert'
 
 description = [[
-Checks if the IP over HTTPS (IP-HTTPS) Tunneling Protocol [1] is supported.
+IP-HTTPS sends Teredo related IPv6 packets over an IPv4-based HTTPS session.
 
-IP-HTTPS sends Teredo related IPv6 packets over an IPv4-based HTTPS session. This
+Checks if the IP over HTTPS (IP-HTTPS) Tunneling Protocol [1] is supported. This
 indicates that Microsoft DirectAccess [2], which allows remote clients to access
 intranet resources on a domain basis, is supported. Windows clients need
 Windows 7 Enterprise/Ultime or Windows 8.1 Enterprise/Ultimate. Servers need
@@ -19,7 +20,7 @@ of Windows and Windows Server are not supported.
 ]]
 
 author = "Niklaus Schiess <nschiess@adversec.com>"
-license = "Same as Nmap--See https://nmap.org/book/man-legal.html"
+license = "Same as Nmap--See http://nmap.org/book/man-legal.html"
 categories = {'discovery', 'safe', 'default'}
 
 ---
@@ -48,29 +49,35 @@ action = function(host, port)
   if host.targetname then
     target = host.targetname
   else
-    -- Try to get the hostname from the SSL certificate.
-    local status, cert = sslcert.getCertificate(host,port)
-    if not status then
-      -- fall back to reverse DNS
-      target = host.name
+    if not string.match(stdnse.get_hostname(host), '%d%d?%d?%.%d%d?%d?%.%d%d?%d?%.%d%d?%d?') then
+        -- If stdnse.get_hostname() returns a hostname, use it as the target.
+        target = stdnse.get_hostname(host)
     else
+      -- If stdnse.get_hostname() returns an IP address, try to get the hostname
+      -- from the SSL certificate.
+      local status,cert = sslcert.getCertificate(host,port)
+      if not status then
+        stdnse.debug1('Could not retrieve SSL certificate')
+        return
+      end
       target = cert.subject['commonName']
     end
   end
 
-  if not target or target == "" then
+  if not target then
     return
   end
 
-  local socket, response = comm.tryssl(host, port,
-    string.format(request, target), { lines=4 })
+  local socket, response = comm.tryssl(host,port,
+    string.format(request, target),
+    { timeout=3000, lines=4 })
   if not socket then
     stdnse.debug1('Problem establishing connection: %s', response)
     return
   end
   socket:close()
 
-  if string.match(response, 'HTTP/1.1 200%s.+HTTPAPI/2.0') then
+  if string.match(response, 'HTTP/1.1 200%s+.+HTTPAPI/2.0') then
     return true, 'IP-HTTPS is supported. This indicates that this host supports Microsoft DirectAccess.'
   end
 end
